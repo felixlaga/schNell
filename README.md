@@ -15,7 +15,18 @@ Create the environment:
 ```console
 uv sync 
 ```
-This will install the dependencies
+This will install the dependencies and create a virtual environment. 
+Now we launch the environment and run jupyter:
+```console
+# activate env
+source .venv/bin/activate
+
+# install schNell
+uv pip install .
+
+# launch local jupyter server
+uv run --with jupyter jupyter lab
+```
 
 ### Legacy
 You can install schnell simply by typing
