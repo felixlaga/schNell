@@ -118,6 +118,100 @@ def optimal_omega_from_ordered_pairs(omega_pairs_9):
         inv2 += 1.0 / (om*om)
     return 1.0 / np.sqrt(inv2)
 
+def power_law_omega_gw_h2(f, amplitude_h2=1.0e-12, alpha=0.65, f_ref=2.5e-3):
+    f = np.asarray(f, float)
+    return amplitude_h2 * (f / f_ref)**alpha
+
+def _evaluate_omega_gw_h2(f_grid, omega_gw_h2):
+    if callable(omega_gw_h2):
+        values = np.asarray(omega_gw_h2(f_grid), dtype=float)
+    else:
+        values = np.asarray(omega_gw_h2, dtype=float)
+        if values.shape != f_grid.shape:
+            raise ValueError("If omega_gw_h2 is an array, it must have the same shape as f_grid.")
+    return values
+
+def _resolve_c_ell_gw(c_ell_gw, ell):
+    if c_ell_gw is None:
+        return 1.0
+    if np.isscalar(c_ell_gw):
+        value = float(c_ell_gw)
+    elif isinstance(c_ell_gw, dict):
+        value = float(c_ell_gw.get(ell, 0.0))
+    else:
+        values = np.asarray(c_ell_gw, dtype=float)
+        if ell >= values.size:
+            raise ValueError("c_ell_gw must contain a value for every requested multipole.")
+        value = float(values[ell])
+    if value < 0.0:
+        raise ValueError("Eq. (4.44) needs C_ell^GW >= 0 for every multipole.")
+    return value
+
+def compute_snr_per_multipole_eq444(
+    f_grid,
+    raw_sensitivity_by_ell,
+    omega_gw_h2,
+    c_ell_gw=None,
+    t_obs_yr=4.0,
+    fmin=None,
+    fmax=None,
+):
+    r"""
+    Exact implementation of Eq. (4.44):
+
+      <SNR>_ell^2 = T \int df
+                    [ sqrt(C_ell^GW) * Omega_GW(f) h^2
+                      / Omega_{GW,n}^ell(f) h^2 ]^2
+
+    The denominator must be the raw Eq. (4.43) sensitivity, not the Figure 9
+    curve divided by sqrt(4*pi).
+    """
+    f = np.asarray(f_grid, dtype=float)
+    if np.any(np.diff(f) <= 0.0):
+        raise ValueError("f_grid must be strictly increasing.")
+
+    omega_gw_vals = _evaluate_omega_gw_h2(f, omega_gw_h2)
+    t_obs_sec = float(t_obs_yr * 365.25 * 24.0 * 3600.0)
+
+    band = np.ones_like(f, dtype=bool)
+    if fmin is not None:
+        band &= f >= float(fmin)
+    if fmax is not None:
+        band &= f <= float(fmax)
+    if np.count_nonzero(band) < 2:
+        raise ValueError("The selected frequency band must contain at least two grid points.")
+
+    ells = np.array(sorted(raw_sensitivity_by_ell.keys()), dtype=int)
+    snr2 = np.zeros_like(ells, dtype=float)
+    integrands = {}
+
+    for i, ell in enumerate(ells):
+        c_ell = _resolve_c_ell_gw(c_ell_gw, ell)
+        omega_sig_ell = np.sqrt(c_ell) * omega_gw_vals
+        omega_noise_ell = np.asarray(raw_sensitivity_by_ell[ell], dtype=float)
+        if omega_noise_ell.shape != f.shape:
+            raise ValueError(f"Sensitivity curve for ell={ell} does not match f_grid.")
+
+        integrand = np.zeros_like(f, dtype=float)
+        mask = band & np.isfinite(omega_sig_ell) & np.isfinite(omega_noise_ell) & (omega_noise_ell > 0.0)
+        if np.count_nonzero(mask) >= 2:
+            integrand[mask] = (omega_sig_ell[mask] / omega_noise_ell[mask])**2
+            snr2[i] = float(t_obs_sec * np.trapezoid(integrand[mask], f[mask]))
+        integrands[ell] = integrand
+
+    return {
+        "ells": ells,
+        "snr2": snr2,
+        "snr": np.sqrt(snr2),
+        "integrands": integrands,
+        "omega_gw_h2": omega_gw_vals,
+    }
+
+def print_snr_table(snr_results):
+    print(f"{'ell':>3} {'SNR^2':>16} {'SNR':>16}")
+    for ell, snr2, snr in zip(snr_results["ells"], snr_results["snr2"], snr_results["snr"]):
+        print(f"{ell:3d} {snr2:16.8e} {snr:16.8e}")
+
 # ============================================================
 # Key point for "real basis" + iter=1 with complex sky maps
 # ============================================================
@@ -164,7 +258,7 @@ def precompute_alm_indices(lmax):
             idx_mpos_by_ell[ell] = np.array([], dtype=np.int64)
     return idx_by_ell, idx_mpos_by_ell
 
-def reproduce_figure9_healpy_real_basis_iter1(f_grid, lmax=10, nside=32, iter_sht=1):
+def compute_lisa_multipole_sensitivity(f_grid, lmax=10, nside=32, iter_sht=1):
     """
     Uses healpy's spherical harmonic transform with iter=iter_sht (e.g. 1),
     while correctly accounting for complex sky maps by computing both:
@@ -175,6 +269,10 @@ def reproduce_figure9_healpy_real_basis_iter1(f_grid, lmax=10, nside=32, iter_sh
 
     This is equivalent to working in a real spherical-harmonic basis (cos/sin modes),
     and it allows use of iter=1 without losing the negative-m information.
+
+    Returns both:
+      - raw Eq. (4.43) sensitivities
+      - Figure 9 curves, which are raw / sqrt(4*pi)
     """
     f_grid = np.asarray(f_grid, float)
     if lmax > 3*nside - 1:
@@ -251,7 +349,7 @@ def reproduce_figure9_healpy_real_basis_iter1(f_grid, lmax=10, nside=32, iter_sh
     idx_by_ell, idx_mpos_by_ell = precompute_alm_indices(lmax)
 
     # Output
-    omega_by_ell = {ell: np.zeros_like(f_grid) for ell in range(lmax + 1)}
+    raw_omega_by_ell = {ell: np.zeros_like(f_grid) for ell in range(lmax + 1)}
 
     # Work arrays
     Rplus  = np.empty((3, npix), dtype=np.complex128)
@@ -342,42 +440,109 @@ def reproduce_figure9_healpy_real_basis_iter1(f_grid, lmax=10, nside=32, iter_sh
                     omega_channel_channel(f, Rtilde_pairs[pidx], N_map[O][fi], N_map[Op][fi])
                 )
 
-            omega_by_ell[ell][fi] = optimal_omega_from_ordered_pairs(omega_pairs) * Y00
+            raw_omega_by_ell[ell][fi] = optimal_omega_from_ordered_pairs(omega_pairs)
 
-    return omega_by_ell
+    figure9_omega_by_ell = {
+        ell: raw_omega_by_ell[ell] * Y00 for ell in range(lmax + 1)
+    }
+    return {"raw": raw_omega_by_ell, "figure9": figure9_omega_by_ell}
+
+def reproduce_figure9_healpy_real_basis_iter1(f_grid, lmax=10, nside=32, iter_sht=1):
+    return compute_lisa_multipole_sensitivity(
+        f_grid=f_grid,
+        lmax=lmax,
+        nside=nside,
+        iter_sht=iter_sht,
+    )["figure9"]
+
+def show_snr_table(snr_results):
+    ells = snr_results["ells"]
+    snr2 = snr_results["snr2"]
+    snr  = snr_results["snr"]
+
+    rows = [
+        [f"{ell:d}", f"{s2:.4e}", f"{s:.4e}"]
+        for ell, s2, s in zip(ells, snr2, snr)
+    ]
+
+    fig, ax = plt.subplots(figsize=(7, 0.5 * len(rows) + 1.5))
+    ax.axis("off")
+
+    tbl = ax.table(
+        cellText=rows,
+        colLabels=[r"$\ell$", r"$\mathrm{SNR}^2$", r"$\mathrm{SNR}$"],
+        loc="center",
+        cellLoc="center",
+        colLoc="center",
+    )
+
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(11)
+    tbl.scale(1.15, 1.35)
+
+    for (r, c), cell in tbl.get_celld().items():
+        cell.set_linewidth(0.8)
+        if r == 0:
+            cell.set_text_props(weight="bold")
+
+    plt.tight_layout()
+    plt.show()
 
 # ============================================================
 # Example run + plot
 # ============================================================
 if __name__ == "__main__":
-    f = np.logspace(-4.5, -0.35, 320)
+    LMAX = 10
+    NSIDE_FAST = 16
+    NFREQ_FAST = 48
+    ITER_SHT = 0
+    T_OBS_YR = 4.0
 
-    # More accuracy via iter=1 on the SHT side; true integral accuracy still improves with nside
-    curves = reproduce_figure9_healpy_real_basis_iter1(
+    f = np.logspace(-4.5, -0.35, NFREQ_FAST)
+
+    sensitivity = compute_lisa_multipole_sensitivity(
         f_grid=f,
-        lmax=10,
-        nside=960,      # nside van 500+ is nodig om een goede plot te maken
-        iter_sht=0    # niet hoger dan 1 doen want anders was de sky map te accuraat ofs, werkte gwn niet met hoge iter
+        lmax=LMAX,
+        nside=NSIDE_FAST,
+        iter_sht=ITER_SHT,
+    )
+    raw_curves = sensitivity["raw"]
+    figure9_curves = sensitivity["figure9"]
+
+    omega_gw_h2 = power_law_omega_gw_h2(
+        f,
+        amplitude_h2=1.0e-12,
+        alpha=0.0,
+        f_ref=1.0e-3,
+    )
+    c_ell_gw = np.ones(LMAX + 1)
+
+    snr_results = compute_snr_per_multipole_eq444(
+        f_grid=f,
+        raw_sensitivity_by_ell=raw_curves,
+        omega_gw_h2=omega_gw_h2,
+        c_ell_gw=c_ell_gw,
+        t_obs_yr=T_OBS_YR,
     )
 
+    # first: your nice curves
     plt.figure(figsize=(7.5, 7))
-    for ell in range(0, 11):
+    for ell in range(0, LMAX + 1):
         ls = "-" if (ell % 2 == 0) else "--"
-        plt.loglog(f, curves[ell], linestyle=ls, label=rf"$\ell={ell}$")
-    
+        plt.loglog(f, figure9_curves[ell], linestyle=ls, label=rf"$\ell={ell}$")
+
     plt.xlabel("Frequency [Hz]")
     plt.ylabel(r"$\Omega^{\ell}_{{\rm GW},n}(f)\,h^2 / \sqrt{4\pi}$")
     plt.ylim(1e-12, 1e0)
-    
+
     ax = plt.gca()
-    
-    # Show every power of 10 on the y-axis
     ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1.0,), numticks=100))
     ax.yaxis.set_major_formatter(LogFormatterMathtext(base=10))
-    
+
     plt.grid(True, which="both", linestyle=":")
     plt.legend(ncol=2, fontsize=9)
     plt.tight_layout()
-    plt.show()
+    plt.show(block=False)
 
-=====
+    # second: nice table
+    show_snr_table(snr_results)
