@@ -493,8 +493,8 @@ def show_snr_table(snr_results):
 # ============================================================
 if __name__ == "__main__":
     LMAX = 10
-    NSIDE_FAST = 16
-    NFREQ_FAST = 48
+    NSIDE_FAST = 820
+    NFREQ_FAST = 320
     ITER_SHT = 0
     T_OBS_YR = 4.0
 
@@ -513,7 +513,7 @@ if __name__ == "__main__":
         f,
         amplitude_h2=1.0e-12,
         alpha=0.0,
-        f_ref=1.0e-3,
+        f_ref=2.5e-3,
     )
     c_ell_gw = np.ones(LMAX + 1)
 
