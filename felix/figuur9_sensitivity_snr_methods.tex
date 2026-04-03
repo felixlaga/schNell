@@ -1,0 +1,384 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{hyperref}
+
+\title{Methods and Assumptions for the Figure 9 Sensitivity Curves and SNR Table}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Scope}
+This note documents the equations, assumptions, and numerical settings used in the \texttt{felix} Figure~9 workflow:
+\begin{itemize}
+\item the sensitivity-curve notebook \texttt{FIGUUR9\_[JUISTE\_VOOR\_BERT].ipynb},
+\item the equivalent script \texttt{notebook\_code.py}, which contains the same Figure~9 curve logic and also the SNR-table calculation.
+\end{itemize}
+
+The notebook itself only plots the sensitivity curves. The SNR table is implemented in \texttt{notebook\_code.py}. The formulas are the same in both places; the only relevant run-time difference is that the notebook uses \texttt{nside=800} while \texttt{notebook\_code.py} uses \texttt{NSIDE\_FAST=820}.
+
+\section{Exact Numerical Setup}
+\subsection{Common constants}
+The code fixes
+\begin{align}
+c &= 299\,792\,458~\mathrm{m\,s^{-1}}, \\
+L &= 2.5\times 10^9~\mathrm{m}, \\
+f_* &= \frac{c}{2\pi L}, \\
+M_{\rm pc} &= 3.0856775814913673\times 10^{22}~\mathrm{m}, \\
+\frac{H_0}{h} &= \frac{100\times 1000}{M_{\rm pc}}~\mathrm{s^{-1}}, \\
+Y_{00} &= \frac{1}{\sqrt{4\pi}}.
+\end{align}
+
+\subsection{Figure notebook run}
+In \texttt{FIGUUR9\_[JUISTE\_VOOR\_BERT].ipynb} the plotted curves use
+\begin{align}
+f &= \text{\texttt{np.logspace(-4.5,-0.35,320)}}~\mathrm{Hz}, \\
+\ell_{\max} &= 10, \\
+\text{\texttt{nside}} &= 800, \\
+\text{\texttt{iter\_sht}} &= 0.
+\end{align}
+
+\subsection{Equivalent script run}
+In \texttt{notebook\_code.py}, the example block uses
+\begin{align}
+f &= \text{\texttt{np.logspace(-4.5,-0.35,320)}}~\mathrm{Hz}, \\
+\ell_{\max} &= 10, \\
+\text{\texttt{NSIDE\_FAST}} &= 820, \\
+\text{\texttt{ITER\_SHT}} &= 0, \\
+T_{\rm obs} &= 4~\mathrm{yr}.
+\end{align}
+
+For the SNR table in \texttt{notebook\_code.py}, the signal model is taken to be
+\begin{align}
+\Omega_{\rm GW}(f) h^2 &= 10^{-12}\left(\frac{f}{2.5\times 10^{-3}~\mathrm{Hz}}\right)^0 = 10^{-12}, \\
+C_\ell^{\rm GW} &= 1 \qquad \text{for all } \ell=0,\dots,10.
+\end{align}
+
+\section{Geometric Assumptions}
+The LISA geometry used here is \emph{static}. There is no orbital motion, no time averaging, and no annual modulation. The three spacecraft positions are fixed to
+\begin{align}
+\mathbf{r}_1 &= (0,0,0), \\
+\mathbf{r}_2 &= (L,0,0), \\
+\mathbf{r}_3 &= \left(\frac{L}{2},\frac{\sqrt{3}L}{2},0\right).
+\end{align}
+
+The arm directions are therefore
+\begin{align}
+\hat{\ell}_{12} &= \frac{\mathbf{r}_2-\mathbf{r}_1}{|\mathbf{r}_2-\mathbf{r}_1|}, &
+\hat{\ell}_{13} &= \frac{\mathbf{r}_3-\mathbf{r}_1}{|\mathbf{r}_3-\mathbf{r}_1|}, \\
+\hat{\ell}_{23} &= \frac{\mathbf{r}_3-\mathbf{r}_2}{|\mathbf{r}_3-\mathbf{r}_2|}, &
+\hat{\ell}_{21} &= \frac{\mathbf{r}_1-\mathbf{r}_2}{|\mathbf{r}_1-\mathbf{r}_2|}, \\
+\hat{\ell}_{31} &= \frac{\mathbf{r}_1-\mathbf{r}_3}{|\mathbf{r}_1-\mathbf{r}_3|}, &
+\hat{\ell}_{32} &= \frac{\mathbf{r}_2-\mathbf{r}_3}{|\mathbf{r}_2-\mathbf{r}_3|}.
+\end{align}
+
+Each spacecraft uses the two outgoing/incoming arms
+\begin{align}
+1 &: (\hat{\ell}_{12},\hat{\ell}_{13}), \\
+2 &: (\hat{\ell}_{23},\hat{\ell}_{21}), \\
+3 &: (\hat{\ell}_{31},\hat{\ell}_{32}).
+\end{align}
+
+The sky is discretized on a HEALPix grid with \texttt{nest=False}, i.e.\ ring ordering.
+
+\section{Noise Model}
+The code uses the Appendix~B noise functions
+\begin{align}
+S_{\rm oms}(f) &=
+\left(15\times 10^{-12}\right)^2
+\left[1+\left(\frac{2\times 10^{-3}}{f}\right)^4\right], \\
+S_{\rm acc}(f) &=
+\left(3\times 10^{-15}\right)^2
+\left[1+\left(\frac{0.4\times 10^{-3}}{f}\right)^2\right]
+\left[1+\left(\frac{f}{8\times 10^{-3}}\right)^4\right].
+\end{align}
+
+From these, the channel noise levels are
+\begin{align}
+\widetilde N_{AE}(f) &=
+\frac{1}{2}\left(2+\cos\frac{f}{f_*}\right)\frac{S_{\rm oms}(f)}{L^2}
+{}+
+2\left(1+\cos\frac{f}{f_*}+\cos^2\frac{f}{f_*}\right)
+\frac{S_{\rm acc}(f)}{L^2}\left(\frac{1}{2\pi f}\right)^4, \\
+\widetilde N_T(f) &=
+\left(1-\cos\frac{f}{f_*}\right)\frac{S_{\rm oms}(f)}{L^2}
+{}+
+2\left(1-\cos\frac{f}{f_*}\right)^2
+\frac{S_{\rm acc}(f)}{L^2}\left(\frac{1}{2\pi f}\right)^4.
+\end{align}
+
+The code then sets
+\begin{equation}
+\widetilde N_A(f)=\widetilde N_E(f)=\widetilde N_{AE}(f),
+\qquad
+\widetilde N_T(f)=\widetilde N_T(f).
+\end{equation}
+
+\section{Sky Basis, Polarizations, and Arm Transfer Functions}
+For each HEALPix direction $(\theta,\phi)$, the unit wavevector is
+\begin{equation}
+\hat{\mathbf{k}} =
+(\sin\theta\cos\phi,\sin\theta\sin\phi,\cos\theta).
+\end{equation}
+
+The basis vectors used in the code are
+\begin{align}
+\hat{\mathbf{e}}_\theta &=
+(\cos\theta\cos\phi,\cos\theta\sin\phi,-\sin\theta), \\
+\hat{\mathbf{e}}_\phi &=
+(-\sin\phi,\cos\phi,0).
+\end{align}
+
+The polarization tensors are
+\begin{align}
+e^+_{ij} &= (\hat e_\theta)_i(\hat e_\theta)_j-(\hat e_\phi)_i(\hat e_\phi)_j, \\
+e^\times_{ij} &= (\hat e_\theta)_i(\hat e_\phi)_j+(\hat e_\phi)_i(\hat e_\theta)_j.
+\end{align}
+
+For any arm direction $\hat{\ell}$, the geometric projection used in the code is
+\begin{equation}
+g^P(\hat{\ell}) = \frac{1}{2}\,\ell_i \ell_j e^P_{ij},
+\qquad
+P\in\{+,\times\}.
+\end{equation}
+
+The transfer-function conventions are
+\begin{align}
+u &= \frac{f}{f_*}, \\
+\mu &= \hat{\mathbf{k}}\cdot \hat{\ell}, \\
+\operatorname{sinc}(x) &= \frac{\sin x}{x},
+\end{align}
+with the explicit code limit $\operatorname{sinc}(0)=1$.
+
+The intermediate functions are
+\begin{align}
+M(u,\mu) &= e^{\frac{i}{2}u(1+\mu)} \, \operatorname{sinc}\!\left[\frac{u}{2}(1+\mu)\right], \\
+T(u,\mu) &= e^{-iu} M(u,-\mu) + e^{-iu\mu} M(u,\mu).
+\end{align}
+
+For spacecraft $i$, with two arms $a$ and $b$, the code constructs
+\begin{align}
+R_i^+(f,\hat{\mathbf{k}}) &= g_a^+\,T(u,\mu_a)-g_b^+\,T(u,\mu_b), \\
+R_i^\times(f,\hat{\mathbf{k}}) &= g_a^\times\,T(u,\mu_a)-g_b^\times\,T(u,\mu_b).
+\end{align}
+
+\section{A/E/T Mixing}
+The Figure~9 code works with the constant mixing matrix
+\begin{equation}
+C_{\rm AET} =
+\begin{pmatrix}
+-1/\sqrt{2} & 0 & 1/\sqrt{2} \\
+1/\sqrt{6} & -2/\sqrt{6} & 1/\sqrt{6} \\
+1/\sqrt{3} & 1/\sqrt{3} & 1/\sqrt{3}
+\end{pmatrix},
+\end{equation}
+whose rows correspond to $(A,E,T)$ and whose columns correspond to the three spacecraft responses.
+
+For a channel pair $(O,O')$, the code uses
+\begin{equation}
+{\rm Mix}_{OO',ij} = C_{Oi}\,C_{O'j}.
+\end{equation}
+
+\section{Response Maps and Spherical Harmonics}
+The pairwise polarization sum is
+\begin{equation}
+\sum_A R_i^A R_j^{A*}
+=
+R_i^+ R_j^{+*} + R_i^\times R_j^{\times *}.
+\end{equation}
+
+The sky map corresponding to Eq.~(4.15) is implemented as
+\begin{equation}
+f_{ij}(f,\hat{\mathbf{k}})
+= \frac{1}{8\pi}
+\left(R_i^+ R_j^{+*} + R_i^\times R_j^{\times *}\right)
+\exp\!\left[-2\pi i f\,\hat{\mathbf{k}}\cdot \Delta\mathbf{x}_{ij}/c\right].
+\end{equation}
+
+The channel-pair sky maps are then
+\begin{equation}
+f_{OO'}(f,\hat{\mathbf{k}})
+= \sum_{i,j} C_{Oi} C_{O'j} \, f_{ij}(f,\hat{\mathbf{k}}).
+\end{equation}
+
+Because these maps are complex, the code does \emph{not} use a single real-map harmonic transform. Instead it computes
+\begin{align}
+a_{\ell m} &= \int d\Omega \, f_{OO'}(\hat{\mathbf{k}})\,Y_{\ell m}^*(\hat{\mathbf{k}}), \\
+c_{\ell m} &= \int d\Omega \, f_{OO'}^*(\hat{\mathbf{k}})\,Y_{\ell m}^*(\hat{\mathbf{k}}),
+\end{align}
+by separately transforming the real and imaginary parts with \texttt{healpy.map2alm}.
+
+The rotation-invariant harmonic power used in the code is
+\begin{equation}
+P_\ell^{OO'} =
+|a_{\ell 0}|^2 + \sum_{m=1}^{\ell}
+\left(|a_{\ell m}|^2 + |c_{\ell m}|^2\right).
+\end{equation}
+
+The response entering the sensitivity curves is then taken to be
+\begin{equation}
+\widetilde R_{OO'}^\ell(f) = \sqrt{\pi\,P_\ell^{OO'}}.
+\end{equation}
+
+This explicit $\sqrt{\pi}$ factor is an implementation choice stated in the code comments: it is included so that the low-frequency $AA$ monopole limit matches $9/20$ rather than $9/(20\sqrt{\pi})$.
+
+To avoid division by zero, the code floors the response:
+\begin{equation}
+\widetilde R_{OO'}^\ell(f) \ge 10^{-50}
+\quad \text{in } \texttt{FIGUUR9\_[JUISTE\_VOOR\_BERT].ipynb},
+\end{equation}
+and
+\begin{equation}
+\widetilde R_{OO'}^\ell(f) \ge 10^{-45}
+\quad \text{in } \texttt{notebook\_code.py}.
+\end{equation}
+
+\section{Sensitivity Curves}
+For a given ordered pair $(O,O')$, the code defines
+\begin{equation}
+\Omega_{{\rm GW},n}^{OO',\ell}(f) h^2
+=
+\frac{4\pi^2\sqrt{4\pi}}{3(H_0/h)^2}\,
+f^3
+\frac{\sqrt{\widetilde N_O(f)\widetilde N_{O'}(f)}}{\widetilde R_{OO'}^\ell(f)}.
+\end{equation}
+
+The code then forms the inverse-variance combination over \emph{all nine ordered pairs}
+\begin{equation}
+(O,O') \in \{AA,AE,AT,EA,EE,ET,TA,TE,TT\},
+\end{equation}
+namely
+\begin{equation}
+\Omega_{{\rm GW},n}^{\ell,{\rm raw}}(f) h^2
+=
+\left[
+\sum_{O,O'}
+\frac{1}{\left(\Omega_{{\rm GW},n}^{OO',\ell}(f) h^2\right)^2}
+\right]^{-1/2}.
+\end{equation}
+
+This means that the implementation \emph{does} count both $AE$ and $EA$ separately, because it explicitly loops over ordered pairs.
+
+The plotted Figure~9 curve is the rescaled version
+\begin{equation}
+\Omega_{{\rm GW},n}^{\ell,{\rm Fig9}}(f) h^2
+=
+Y_{00}\,
+\Omega_{{\rm GW},n}^{\ell,{\rm raw}}(f) h^2
+=
+\frac{1}{\sqrt{4\pi}}\,
+\Omega_{{\rm GW},n}^{\ell,{\rm raw}}(f) h^2.
+\end{equation}
+
+So the notebook plot label
+\begin{equation}
+\Omega_{{\rm GW},n}^{\ell}(f)\,h^2/\sqrt{4\pi}
+\end{equation}
+is literally the quantity that is shown.
+
+\section{SNR Table}
+The SNR table is computed in \texttt{notebook\_code.py} through \texttt{compute\_snr\_per\_multipole\_eq444}. The implemented equation is
+\begin{equation}
+{\rm SNR}_\ell^2
+=
+T_{\rm obs}
+\int df
+\left[
+\frac{\Omega_{\rm GW}^{\ell}(f) h^2}
+\Omega_{{\rm GW},n}^{\ell,{\rm raw}}(f) h^2
+\right]^2,
+\end{equation}
+with
+\begin{equation}
+\Omega_{\rm GW}^{\ell}(f) h^2
+=
+\sqrt{C_\ell^{\rm GW}}\,
+\Omega_{\rm GW}(f) h^2.
+\end{equation}
+
+For the example table in \texttt{notebook\_code.py}, the choices are
+\begin{align}
+T_{\rm obs} &= 4\times 365.25\times 24\times 3600~\mathrm{s}, \\
+\Omega_{\rm GW}(f) h^2 &= 10^{-12}, \\
+C_\ell^{\rm GW} &= 1.
+\end{align}
+
+The integral is evaluated with the trapezoidal rule on the same frequency grid used for the sensitivity curves:
+\begin{equation}
+{\rm SNR}_\ell^2
+\approx
+T_{\rm obs}
+\operatorname{trapz}\!\left[
+\left(
+\frac{\Omega_{\rm GW}^{\ell}(f_k) h^2}
+\Omega_{{\rm GW},n}^{\ell,{\rm raw}}(f_k) h^2
+\right)^2,
+f_k
+\right].
+\end{equation}
+
+The SNR itself is then
+\begin{equation}
+{\rm SNR}_\ell = \sqrt{{\rm SNR}_\ell^2}.
+\end{equation}
+
+\section{Important Practical Point}
+The SNR table must use the \emph{raw} sensitivity curves,
+\begin{equation}
+\Omega_{{\rm GW},n}^{\ell,{\rm raw}}(f) h^2,
+\end{equation}
+not the plotted Figure~9 curves divided by $\sqrt{4\pi}$.
+
+Equivalently, if one starts from the plotted curves, one must undo the plotting rescaling:
+\begin{equation}
+\Omega_{{\rm GW},n}^{\ell,{\rm raw}}(f) h^2
+=
+\sqrt{4\pi}\,
+\Omega_{{\rm GW},n}^{\ell,{\rm Fig9}}(f) h^2.
+\end{equation}
+
+This is exactly why \texttt{notebook\_code.py} keeps both
+\begin{itemize}
+\item \texttt{sensitivity["raw"]}, and
+\item \texttt{sensitivity["figure9"]}.
+\end{itemize}
+The SNR table uses \texttt{raw}; the plot uses \texttt{figure9}.
+
+\section{What Is and Is Not Included}
+Included in this workflow:
+\begin{itemize}
+\item finite-arm transfer functions,
+\item both $+$ and $\times$ polarizations,
+\item baseline phase factors,
+\item all nine ordered A/E/T channel pairs,
+\item complex-sky harmonic power with both positive and negative $m$ information retained through the $(a_{\ell m},c_{\ell m})$ construction,
+\item a static equilateral LISA triangle.
+\end{itemize}
+
+Not included in this workflow:
+\begin{itemize}
+\item LISA orbital motion,
+\item time averaging over the constellation motion,
+\item pixel-window deconvolution in the final \texttt{FIGUUR9\_[JUISTE\_VOOR\_BERT].ipynb} pipeline,
+\item any sky mask or anisotropic detector motion,
+\item any SGWB model more complicated than the user-supplied $\Omega_{\rm GW}(f)$ and $C_\ell^{\rm GW}$.
+\end{itemize}
+
+\section{Summary}
+The Figure~9 curves are obtained by computing static LISA response maps on a HEALPix sky, projecting them onto A/E/T channel pairs, extracting the multipole response $\widetilde R^\ell_{OO'}(f)$, converting that response into ordered-pair noise curves, inverse-variance combining the nine ordered pairs, and finally dividing by $\sqrt{4\pi}$ for plotting.
+
+The SNR table uses the same pipeline but replaces the plotted curves by the raw, unscaled sensitivity curves and inserts them into Eq.~(4.44) with the specific example choices
+\begin{equation}
+T_{\rm obs}=4~{\rm yr},
+\qquad
+\Omega_{\rm GW}(f)h^2=10^{-12},
+\qquad
+C_\ell^{\rm GW}=1.
+\end{equation}
+
+\end{document}
