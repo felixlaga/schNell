@@ -99,6 +99,14 @@ C_AET = np.array([
 ], dtype=float)
 O_list = ["A", "E", "T"]
 O_idx  = {O: i for i, O in enumerate(O_list)}
+PAIR_GROUPS_AET = {
+    "AA": ("AA",),
+    "EE": ("EE",),
+    "TT": ("TT",),
+    "AE": ("AE", "EA"),
+    "AT": ("AT", "TA"),
+    "ET": ("ET", "TE"),
+}
 
 # ============================================================
 # Sensitivity equations (paper Eqs. 4.42-4.43) letterlijk gwn de formules net boven Figuur 9. (NOTE VOOR BERT - zou het kunnen dat we de
@@ -257,6 +265,335 @@ def precompute_alm_indices(lmax):
         else:
             idx_mpos_by_ell[ell] = np.array([], dtype=np.int64)
     return idx_by_ell, idx_mpos_by_ell
+
+
+def _build_static_lisa_geometry():
+    L = L_ARM
+    r1 = np.array([0.0, 0.0, 0.0])
+    r2 = np.array([L, 0.0, 0.0])
+    r3 = np.array([0.5 * L, 0.5 * np.sqrt(3.0) * L, 0.0])
+
+    def unit(v):
+        return v / np.linalg.norm(v)
+
+    l12 = unit(r2 - r1)
+    l13 = unit(r3 - r1)
+    l21 = unit(r1 - r2)
+    l23 = unit(r3 - r2)
+    l31 = unit(r1 - r3)
+    l32 = unit(r2 - r3)
+    arms_by_sc = {0: (l12, l13), 1: (l23, l21), 2: (l31, l32)}
+
+    pos_sec = [r1 / C_LIGHT, r2 / C_LIGHT, r3 / C_LIGHT]
+    delta_sec = np.zeros((3, 3, 3))
+    for i in range(3):
+        for j in range(3):
+            delta_sec[i, j] = pos_sec[i] - pos_sec[j]
+
+    return arms_by_sc, delta_sec
+
+
+def _angular_grid(n_theta=181, n_phi=361):
+    theta_vals = np.linspace(0.0, np.pi, int(n_theta))
+    phi_vals = np.linspace(0.0, 2.0 * np.pi, int(n_phi))
+    phi_grid, theta_grid = np.meshgrid(phi_vals, theta_vals)
+    theta = theta_grid.ravel()
+    phi = phi_grid.ravel()
+    sin_t = np.sin(theta)
+    khat = np.stack(
+        [sin_t * np.cos(phi), sin_t * np.sin(phi), np.cos(theta)],
+        axis=1,
+    )
+    return theta_vals, phi_vals, theta_grid, phi_grid, khat
+
+
+def compute_lisa_response_pair_sky_maps(
+    f=None,
+    u=0.1,
+    n_theta=181,
+    n_phi=361,
+    symmetrize=True,
+    polarization="R",
+):
+    """
+    Compute the angular integrand maps for the LISA A/E/T response pairs
+    on a regular (phi, theta) grid.
+
+    Args:
+        f: frequency in Hz. If ``None``, use ``u * F_STAR``.
+        u: dimensionless frequency ``f / F_STAR`` used when ``f`` is ``None``.
+        n_theta: number of polar-angle samples in ``[0, pi]``.
+        n_phi: number of azimuth samples in ``[0, 2*pi]``.
+        symmetrize: if ``True``, return the six independent pairs
+            ``AA, EE, TT, AE, AT, ET`` with cross-pairs averaged over
+            both channel orderings.
+        polarization: one of ``"R"``, ``"L"``, or ``"I"`` for
+            right-handed, left-handed, or unpolarized/intensity maps.
+
+    Returns:
+        dict: containing ``theta_vals``, ``phi_vals``, ``theta_grid``,
+        ``phi_grid``, ``frequency``, ``u``, and ``maps``.
+    """
+    if f is None:
+        f = float(u) * F_STAR
+    f = float(f)
+    u = f / F_STAR
+    polarization = polarization.upper()
+    if polarization not in {"R", "L", "I"}:
+        raise ValueError("polarization must be 'R', 'L', or 'I'")
+
+    theta_vals, phi_vals, theta_grid, phi_grid, khat = _angular_grid(
+        n_theta=n_theta,
+        n_phi=n_phi,
+    )
+    theta = theta_grid.ravel()
+    phi = phi_grid.ravel()
+    npix = theta.size
+
+    e_plus, e_cross = polarization_tensors_from_k(khat, theta, phi)
+    arms_by_sc, delta_sec = _build_static_lisa_geometry()
+
+    mu_a = np.empty((3, npix), dtype=np.float64)
+    mu_b = np.empty((3, npix), dtype=np.float64)
+    gp_a = np.empty((3, npix), dtype=np.float64)
+    gx_a = np.empty((3, npix), dtype=np.float64)
+    gp_b = np.empty((3, npix), dtype=np.float64)
+    gx_b = np.empty((3, npix), dtype=np.float64)
+
+    for i in range(3):
+        la, lb = arms_by_sc[i]
+        mu_a[i] = khat @ la
+        mu_b[i] = khat @ lb
+        gp_a[i] = g_pol_from_arm(la, e_plus).real
+        gx_a[i] = g_pol_from_arm(la, e_cross).real
+        gp_b[i] = g_pol_from_arm(lb, e_plus).real
+        gx_b[i] = g_pol_from_arm(lb, e_cross).real
+
+    kdot_delta = np.zeros((3, 3, npix), dtype=np.float64)
+    for i in range(3):
+        for j in range(3):
+            kdot_delta[i, j] = khat @ delta_sec[i, j]
+    kdot_flat = kdot_delta.reshape(9, npix)
+
+    ordered_pairs = [(O, Op) for O in O_list for Op in O_list]
+    ordered_labels = [f"{O}{Op}" for O, Op in ordered_pairs]
+    mix = np.empty((9, 9), dtype=np.float64)
+    for pidx, (O, Op) in enumerate(ordered_pairs):
+        cO = C_AET[O_idx[O]]
+        cOp = C_AET[O_idx[Op]]
+        mix[pidx, :] = (cO[:, None] * cOp[None, :]).reshape(9)
+
+    ta_a = T_transfer(u, mu_a)
+    ta_b = T_transfer(u, mu_b)
+    rplus = gp_a * ta_a - gp_b * ta_b
+    rcross = gx_a * ta_a - gx_b * ta_b
+    plusplus = rplus[:, None, :] * np.conj(rplus[None, :, :])
+    crosscross = rcross[:, None, :] * np.conj(rcross[None, :, :])
+    if polarization == "I":
+        pol_sum = plusplus + crosscross
+    else:
+        handedness = 1.0 if polarization == "R" else -1.0
+        pol_sum = 0.5 * (
+            plusplus
+            + crosscross
+            + 1j * handedness
+            * (
+                rcross[:, None, :] * np.conj(rplus[None, :, :])
+                - rplus[:, None, :] * np.conj(rcross[None, :, :])
+            )
+        )
+    phase_flat = np.exp(-2j * np.pi * f * kdot_flat)
+    maps_ij_flat = (1.0 / (8.0 * np.pi)) * pol_sum.reshape(9, npix) * phase_flat
+    maps_pair = mix @ maps_ij_flat
+
+    ordered_map_dict = {
+        label: maps_pair[pidx].reshape(theta_grid.shape)
+        for pidx, label in enumerate(ordered_labels)
+    }
+    if not symmetrize:
+        map_dict = ordered_map_dict
+    else:
+        map_dict = {}
+        for pair, names in PAIR_GROUPS_AET.items():
+            stacked = np.stack([ordered_map_dict[name] for name in names], axis=0)
+            map_dict[pair] = np.mean(stacked, axis=0)
+
+    return {
+        "theta_vals": theta_vals,
+        "phi_vals": phi_vals,
+        "theta_grid": theta_grid,
+        "phi_grid": phi_grid,
+        "frequency": f,
+        "u": u,
+        "polarization": polarization,
+        "maps": map_dict,
+    }
+
+
+def _pi_axis_ticks():
+    return {
+        "phi": (
+            [0.0, 0.5 * np.pi, np.pi, 1.5 * np.pi, 2.0 * np.pi],
+            ["0", r"$\pi/2$", r"$\pi$", r"$3\pi/2$", r"$2\pi$"],
+        ),
+        "theta": (
+            [0.0, 0.25 * np.pi, 0.5 * np.pi, 0.75 * np.pi, np.pi],
+            ["0", r"$\pi/4$", r"$\pi/2$", r"$3\pi/4$", r"$\pi$"],
+        ),
+    }
+
+
+def plot_lisa_response_pair_angular_dependence(
+    f=None,
+    u=0.1,
+    n_theta=181,
+    n_phi=361,
+    pairs=None,
+    component="abs",
+    polarization="R",
+    levels=7,
+    panel_scale="individual",
+    cmap_abs="cividis",
+    cmap_signed="RdBu_r",
+    figsize=None,
+    suptitle=None,
+    savepath=None,
+    show=True,
+):
+    """
+    Plot the angular dependence of the LISA response-function integrands.
+
+    Args:
+        f: frequency in Hz. If ``None``, use ``u * F_STAR``.
+        u: dimensionless frequency ``f / F_STAR`` used when ``f`` is ``None``.
+        n_theta: number of polar-angle samples.
+        n_phi: number of azimuth samples.
+        pairs: iterable of pair labels to plot. Defaults to the six
+            independent pairs ``AA, EE, TT, AE, AT, ET``.
+        component: one of ``"abs"``, ``"real"``, or ``"imag"``.
+        polarization: one of ``"R"``, ``"L"``, or ``"I"``.
+        levels: number of contour levels.
+        panel_scale: ``"individual"`` or ``"shared"`` color scaling.
+        cmap_abs: colormap for magnitude plots.
+        cmap_signed: colormap for signed plots.
+        figsize: optional figure size.
+        suptitle: optional figure title.
+        savepath: optional path passed to ``savefig``.
+        show: call ``plt.show()`` before returning.
+
+    Returns:
+        tuple: ``(fig, axes, sky_maps)``.
+    """
+    component = component.lower()
+    if component not in {"abs", "real", "imag"}:
+        raise ValueError("component must be 'abs', 'real', or 'imag'")
+    if panel_scale not in {"individual", "shared"}:
+        raise ValueError("panel_scale must be 'individual' or 'shared'")
+
+    sky_maps = compute_lisa_response_pair_sky_maps(
+        f=f,
+        u=u,
+        n_theta=n_theta,
+        n_phi=n_phi,
+        symmetrize=True,
+        polarization=polarization,
+    )
+    if pairs is None:
+        pairs = ["AA", "EE", "TT", "AE", "AT", "ET"]
+    pairs = list(pairs)
+
+    def extract_component(values):
+        if component == "abs":
+            return np.abs(values)
+        if component == "real":
+            return np.real(values)
+        return np.imag(values)
+
+    values_by_pair = {
+        pair: extract_component(sky_maps["maps"][pair])
+        for pair in pairs
+    }
+
+    n_panels = len(pairs)
+    ncols = min(3, n_panels)
+    nrows = int(np.ceil(n_panels / ncols))
+    if figsize is None:
+        figsize = (5.2 * ncols, 4.0 * nrows)
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False)
+
+    shared_bounds = None
+    if panel_scale == "shared":
+        stacked = np.stack(list(values_by_pair.values()), axis=0)
+        if component == "abs":
+            vmax = np.max(stacked)
+            shared_bounds = (0.0, vmax)
+        else:
+            vmax = np.max(np.abs(stacked))
+            shared_bounds = (-vmax, vmax)
+
+    tick_info = _pi_axis_ticks()
+    phi_ticks, phi_labels = tick_info["phi"]
+    theta_ticks, theta_labels = tick_info["theta"]
+
+    for ax, pair in zip(axes.flat, pairs):
+        values = values_by_pair[pair]
+        if panel_scale == "shared":
+            vmin, vmax = shared_bounds
+        elif component == "abs":
+            vmin, vmax = 0.0, np.max(values)
+        else:
+            vmax = np.max(np.abs(values))
+            vmin = -vmax
+        if np.isclose(vmax, vmin):
+            vmax = vmin + 1e-15
+
+        contour_levels = np.linspace(vmin, vmax, int(levels))
+        contour = ax.contourf(
+            sky_maps["phi_grid"],
+            sky_maps["theta_grid"],
+            values,
+            levels=contour_levels,
+            cmap=cmap_abs if component == "abs" else cmap_signed,
+        )
+        ax.contour(
+            sky_maps["phi_grid"],
+            sky_maps["theta_grid"],
+            values,
+            levels=contour_levels,
+            colors="0.35",
+            linewidths=0.45,
+            alpha=0.55,
+        )
+        title_component = {
+            "abs": rf"$|R_{{{sky_maps['polarization']}}}^{{{pair}}}|$ integrand",
+            "real": rf"$\Re(R_{{{sky_maps['polarization']}}}^{{{pair}}})$ integrand",
+            "imag": rf"$\Im(R_{{{sky_maps['polarization']}}}^{{{pair}}})$ integrand",
+        }[component]
+        ax.set_title(title_component)
+        ax.set_xlabel(r"azimuthal angle $\phi$")
+        ax.set_ylabel(r"polar angle $\theta$")
+        ax.set_xticks(phi_ticks)
+        ax.set_xticklabels(phi_labels)
+        ax.set_yticks(theta_ticks)
+        ax.set_yticklabels(theta_labels)
+        fig.colorbar(contour, ax=ax, fraction=0.046, pad=0.04)
+
+    for ax in axes.flat[n_panels:]:
+        ax.axis("off")
+
+    if suptitle is None:
+        suptitle = (
+            "Angular dependence of LISA response-function integrands "
+            rf"for {sky_maps['polarization']}-handed polarization at "
+            rf"$f / f_{{\star}} = {sky_maps['u']:.3g}$"
+        )
+    fig.suptitle(suptitle)
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
+    if savepath is not None:
+        fig.savefig(savepath, bbox_inches="tight", dpi=200)
+    if show:
+        plt.show()
+    return fig, axes, sky_maps
 
 def compute_lisa_multipole_sensitivity(f_grid, lmax=10, nside=32, iter_sht=1):
     """
