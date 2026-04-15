@@ -1,0 +1,385 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm,mathtools}
+\usepackage[T1]{fontenc}
+
+\title{Static-LISA Angular Response Integrands:\\Definitions, Harmonic Projection, and Physical Interpretation}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Purpose}
+
+This note records the precise mathematical definitions used to generate the angular response-function plots in the static-LISA scripts
+\texttt{plots/make\_lisa\_response\_plots.py} and
+\texttt{felix/notebook\_code.py}.
+The displayed panels are sky maps of the directional response kernels for the channel pairs
+\[
+AA,\ EE,\ TT,\ AE,\ AT,\ ET,
+\]
+evaluated at fixed dimensionless frequency
+\[
+u \equiv \frac{f}{f_\star},
+\qquad
+f_\star \equiv \frac{c}{2\pi L},
+\]
+for a static equilateral LISA triangle of arm length
+\[
+L = 2.5\times 10^9\,{\rm m}.
+\]
+
+The angular plots are not multipole responses.
+They are the sky-dependent kernels that are projected onto spherical harmonics only at a later stage.
+
+\section{Static detector geometry}
+
+The static triangle lies in the $xy$-plane, with spacecraft positions
+\begin{align}
+\bm r_1 &= (0,0,0), \\
+\bm r_2 &= (L,0,0), \\
+\bm r_3 &= \left(\frac{L}{2}, \frac{\sqrt{3}}{2}L, 0\right).
+\end{align}
+The six directed arm unit vectors are therefore
+\begin{align}
+\hat{\bm l}_{12} &= \frac{\bm r_2 - \bm r_1}{|\bm r_2 - \bm r_1|},
+&
+\hat{\bm l}_{13} &= \frac{\bm r_3 - \bm r_1}{|\bm r_3 - \bm r_1|}, \\
+\hat{\bm l}_{21} &= \frac{\bm r_1 - \bm r_2}{|\bm r_1 - \bm r_2|},
+&
+\hat{\bm l}_{23} &= \frac{\bm r_3 - \bm r_2}{|\bm r_3 - \bm r_2|}, \\
+\hat{\bm l}_{31} &= \frac{\bm r_1 - \bm r_3}{|\bm r_1 - \bm r_3|},
+&
+\hat{\bm l}_{32} &= \frac{\bm r_2 - \bm r_3}{|\bm r_2 - \bm r_3|}.
+\end{align}
+
+For spacecraft $i\in\{1,2,3\}$ we denote by $\hat{\bm l}_{a,i}$ and $\hat{\bm l}_{b,i}$ the two outgoing arm directions used in the code:
+\begin{align}
+(\hat{\bm l}_{a,1},\hat{\bm l}_{b,1}) &= (\hat{\bm l}_{12},\hat{\bm l}_{13}), \\
+(\hat{\bm l}_{a,2},\hat{\bm l}_{b,2}) &= (\hat{\bm l}_{23},\hat{\bm l}_{21}), \\
+(\hat{\bm l}_{a,3},\hat{\bm l}_{b,3}) &= (\hat{\bm l}_{31},\hat{\bm l}_{32}).
+\end{align}
+
+\section{Sky direction and polarization tensors}
+
+For a sky direction $(\theta,\phi)$, the propagation unit vector is
+\begin{equation}
+\hat{\bm n}(\theta,\phi)
+=
+(\sin\theta\cos\phi,\ \sin\theta\sin\phi,\ \cos\theta).
+\end{equation}
+The orthonormal tangent basis used in the code is
+\begin{align}
+\hat{\bm e}_\theta
+&=
+(\cos\theta\cos\phi,\ \cos\theta\sin\phi,\ -\sin\theta), \\
+\hat{\bm e}_\phi
+&=
+(-\sin\phi,\ \cos\phi,\ 0).
+\end{align}
+The linear-polarization tensors are then
+\begin{align}
+e^+_{ij}(\hat{\bm n})
+&=
+\hat e_{\theta,i}\hat e_{\theta,j}
+-
+\hat e_{\phi,i}\hat e_{\phi,j}, \\
+e^\times_{ij}(\hat{\bm n})
+&=
+\hat e_{\theta,i}\hat e_{\phi,j}
++
+\hat e_{\phi,i}\hat e_{\theta,j}.
+\end{align}
+
+\section{Arm projection factors and transfer function}
+
+For a given arm direction $\hat{\bm l}$ and polarization $P\in\{+,\times\}$, the arm-projection factor is
+\begin{equation}
+g^P(\hat{\bm l},\hat{\bm n})
+=
+\frac{1}{2}\,\hat l_i \hat l_j\, e^P_{ij}(\hat{\bm n}).
+\end{equation}
+For the two arms attached to spacecraft $i$, we define
+\begin{align}
+g^P_{a,i}(\hat{\bm n}) &= g^P(\hat{\bm l}_{a,i},\hat{\bm n}), \\
+g^P_{b,i}(\hat{\bm n}) &= g^P(\hat{\bm l}_{b,i},\hat{\bm n}).
+\end{align}
+
+The directional cosines entering the transfer functions are
+\begin{align}
+\mu_{a,i}(\hat{\bm n}) &= \hat{\bm n}\cdot \hat{\bm l}_{a,i}, \\
+\mu_{b,i}(\hat{\bm n}) &= \hat{\bm n}\cdot \hat{\bm l}_{b,i}.
+\end{align}
+
+The code uses the dimensionless frequency
+\begin{equation}
+u = \frac{f}{f_\star} = \frac{2\pi L f}{c},
+\end{equation}
+together with the auxiliary functions
+\begin{align}
+{\rm sinc}(x) &=
+\begin{cases}
+\dfrac{\sin x}{x}, & x\neq 0, \\[6pt]
+1, & x=0,
+\end{cases}
+\\[6pt]
+M(u,\mu) &= \exp\!\left[\frac{i}{2}u(1+\mu)\right]\,
+{\rm sinc}\!\left[\frac{1}{2}u(1+\mu)\right], \\
+T(u,\mu) &= e^{-iu}\,M(u,-\mu) + e^{-iu\mu}\,M(u,\mu).
+\end{align}
+These are exactly the functions denoted \texttt{M\_transfer} and \texttt{T\_transfer} in the code.
+
+\section{Single-spacecraft responses}
+
+The code constructs for each spacecraft $i$ the two complex response amplitudes
+\begin{align}
+R_i^+(f,\hat{\bm n})
+&=
+g^+_{a,i}(\hat{\bm n})\,T\!\left(u,\mu_{a,i}(\hat{\bm n})\right)
+-
+g^+_{b,i}(\hat{\bm n})\,T\!\left(u,\mu_{b,i}(\hat{\bm n})\right), \\
+R_i^\times(f,\hat{\bm n})
+&=
+g^\times_{a,i}(\hat{\bm n})\,T\!\left(u,\mu_{a,i}(\hat{\bm n})\right)
+-
+g^\times_{b,i}(\hat{\bm n})\,T\!\left(u,\mu_{b,i}(\hat{\bm n})\right).
+\end{align}
+
+\section{Polarization combinations}
+
+Three polarization combinations are implemented.
+For the unpolarized or intensity response,
+\begin{equation}
+\Pi^I_{ij}(f,\hat{\bm n})
+=
+R_i^+(f,\hat{\bm n})\,R_j^{+*}(f,\hat{\bm n})
++
+R_i^\times(f,\hat{\bm n})\,R_j^{\times *}(f,\hat{\bm n}).
+\end{equation}
+
+For the circularly polarized cases, the code uses
+\begin{equation}
+\Pi^\lambda_{ij}(f,\hat{\bm n})
+=
+\frac{1}{2}
+\Big[
+R_i^+R_j^{+*}
++
+R_i^\times R_j^{\times *}
++
+i\,s_\lambda
+\big(
+R_i^\times R_j^{+*}
+-
+R_i^+ R_j^{\times *}
+\big)
+\Big],
+\end{equation}
+with
+\begin{equation}
+s_R = +1,
+\qquad
+s_L = -1.
+\end{equation}
+All products are evaluated at the same $(f,\hat{\bm n})$ and the dependence has been suppressed for compactness.
+
+\section{Baseline phase and pair kernel}
+
+The baseline phase factor between spacecraft $i$ and $j$ is
+\begin{equation}
+\Phi_{ij}(f,\hat{\bm n})
+=
+\exp\!\left[
+-\,i\,\frac{2\pi f}{c}\,
+\hat{\bm n}\cdot(\bm r_i-\bm r_j)
+\right].
+\end{equation}
+The basic sky kernel entering the maps is
+\begin{equation}
+\mathcal K^\lambda_{ij}(f,\hat{\bm n})
+=
+\frac{1}{8\pi}\,
+\Pi^\lambda_{ij}(f,\hat{\bm n})\,
+\Phi_{ij}(f,\hat{\bm n}),
+\end{equation}
+where $\lambda\in\{R,L,I\}$.
+
+\section{Mixing to the AET basis}
+
+The TDI-like channel combinations are introduced with the fixed mixing matrix
+\begin{equation}
+C_{\rm AET}
+=
+\begin{pmatrix}
+-1/\sqrt{2} & 0 & 1/\sqrt{2} \\
+1/\sqrt{6} & -2/\sqrt{6} & 1/\sqrt{6} \\
+1/\sqrt{3} & 1/\sqrt{3} & 1/\sqrt{3}
+\end{pmatrix},
+\end{equation}
+whose rows correspond to the channels $A$, $E$, and $T$.
+
+For $O,O'\in\{A,E,T\}$, the channel-pair kernel is
+\begin{equation}
+\mathcal K^\lambda_{OO'}(f,\hat{\bm n})
+=
+\sum_{i=1}^3 \sum_{j=1}^3
+C_{Oi}\,C_{O'j}\,
+\mathcal K^\lambda_{ij}(f,\hat{\bm n}).
+\end{equation}
+
+The plots display the six independent pair combinations
+\[
+AA,\ EE,\ TT,\ AE,\ AT,\ ET.
+\]
+For the cross-pair panels, the code symmetrizes the ordered maps according to
+\begin{align}
+\mathcal K^\lambda_{AE} &\equiv \frac{1}{2}\left(\mathcal K^\lambda_{AE} + \mathcal K^\lambda_{EA}\right), \\
+\mathcal K^\lambda_{AT} &\equiv \frac{1}{2}\left(\mathcal K^\lambda_{AT} + \mathcal K^\lambda_{TA}\right), \\
+\mathcal K^\lambda_{ET} &\equiv \frac{1}{2}\left(\mathcal K^\lambda_{ET} + \mathcal K^\lambda_{TE}\right).
+\end{align}
+
+\section{What is actually plotted}
+
+Let
+\begin{equation}
+\mathcal K^\lambda_{OO'}(f,\theta,\phi)
+\equiv
+\mathcal K^\lambda_{OO'}\!\left(f,\hat{\bm n}(\theta,\phi)\right).
+\end{equation}
+The plotting routine may display one of the following quantities:
+\begin{align}
+|\mathcal K^\lambda_{OO'}(f,\theta,\phi)|,
+\qquad
+\Re\!\left[\mathcal K^\lambda_{OO'}(f,\theta,\phi)\right],
+\qquad
+\Im\!\left[\mathcal K^\lambda_{OO'}(f,\theta,\phi)\right].
+\end{align}
+The default choice used in the present plots is
+\[
+\big|\mathcal K^\lambda_{OO'}(f,\theta,\phi)\big|.
+\]
+
+\section{How to read the pictures physically}
+
+For the static triangle adopted here, the detector plane is the $xy$-plane.
+Accordingly,
+\[
+\theta = 0,\ \pi
+\]
+corresponds to waves propagating perpendicular to the detector plane, whereas
+\[
+\theta = \frac{\pi}{2}
+\]
+corresponds to waves propagating within the detector plane.
+The angle $\phi$ is the azimuth around the triangle.
+
+A bright region in a panel therefore means that a wave arriving from that sky direction contributes strongly to the corresponding channel-pair response at the chosen frequency.
+However, because the default panels show the magnitude
+\[
+\big|\mathcal K^\lambda_{OO'}(f,\theta,\phi)\big|,
+\]
+they do not indicate whether that part of the sky contributes with positive or negative phase to the final sky integral, and they do not by themselves reveal the multipole content.
+To inspect cancellation structure one must instead plot
+\[
+\Re(\mathcal K^\lambda_{OO'})
+\qquad\text{or}\qquad
+\Im(\mathcal K^\lambda_{OO'}).
+\]
+
+\section{Why the $TT$ panel can look empty}
+
+At low dimensionless frequency
+\[
+u = \frac{f}{f_\star},
+\]
+the $T$ channel is a near-null channel for gravitational-wave response.
+Consequently,
+\[
+\mathcal K^\lambda_{TT}(f,\hat{\bm n})
+\]
+is strongly suppressed throughout the sky at small $u$.
+This is why the $TT$ panel appears nearly empty in the low-frequency plots and only develops visible structure once $u$ becomes appreciable.
+
+\section{Where the multipole dependence enters}
+
+The angular plots stop at the kernel level.
+The multipole dependence appears only after projection onto spherical harmonics.
+For each pair kernel the code constructs
+\begin{equation}
+a^{OO',\lambda}_{\ell m}(f)
+=
+\int d\Omega\,
+\mathcal K^\lambda_{OO'}(f,\hat{\bm n})\,
+Y_{\ell m}^*(\hat{\bm n}).
+\end{equation}
+
+Because the sky kernels are complex, the implementation also constructs
+\begin{equation}
+c^{OO',\lambda}_{\ell m}(f)
+=
+\int d\Omega\,
+\mathcal K^{\lambda *}_{OO'}(f,\hat{\bm n})\,
+Y_{\ell m}^*(\hat{\bm n}).
+\end{equation}
+The rotation-invariant harmonic response used in the code is then
+\begin{equation}
+\widetilde R^{OO',\lambda}_\ell(f)
+=
+\left[
+\pi
+\left(
+|a_{\ell 0}|^2
++
+\sum_{m=1}^{\ell}
+\big(
+|a_{\ell m}|^2 + |c_{\ell m}|^2
+\big)
+\right)
+\right]^{1/2}.
+\end{equation}
+This is the exact quantity implemented in the real-basis spherical-harmonic treatment of the code.
+
+Thus the conceptual chain is
+\begin{equation}
+\mathcal K^\lambda_{OO'}(f,\hat{\bm n})
+\;\longrightarrow\;
+a^{OO',\lambda}_{\ell m}(f)
+\;\longrightarrow\;
+\widetilde R^{OO',\lambda}_\ell(f).
+\end{equation}
+
+\section{Connection to the sensitivity curves}
+
+Although the angular maps do not require the noise model, the same pipeline is used later to build channel-pair sensitivity curves.
+Given channel noises $\widetilde N_O(f)$ and $\widetilde N_{O'}(f)$, the code uses
+\begin{equation}
+\Omega_{{\rm GW},n;OO'}^\ell(f)\,h^2
+=
+\frac{4\pi^2\sqrt{4\pi}}{3\,H_{0/h}^2}\,
+f^3\,
+\frac{\sqrt{\widetilde N_O(f)\,\widetilde N_{O'}(f)}}{\widetilde R^{OO'}_\ell(f)},
+\end{equation}
+where $H_{0/h}$ is the quantity denoted \texttt{H0\_OVER\_h} in the code.
+The optimally combined sensitivity is then obtained by inverse-variance combination over the ordered channel pairs.
+
+\section{Summary}
+
+The plotted panels are directional kernels
+\[
+\mathcal K^\lambda_{OO'}(f,\hat{\bm n}),
+\]
+not yet multipoles.
+The polarization label $\lambda\in\{R,L,I\}$ specifies which combination of the linear $+$ and $\times$ responses is used.
+The angular dependence arises from the arm geometry, the finite-arm transfer functions, and the baseline phase.
+The multipole dependence enters only through the spherical-harmonic projection
+\[
+\mathcal K^\lambda_{OO'}(f,\hat{\bm n})
+\to
+a^{OO',\lambda}_{\ell m}(f)
+\to
+\widetilde R^{OO',\lambda}_\ell(f).
+\]
+
+\end{document}
